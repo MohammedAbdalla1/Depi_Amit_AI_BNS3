@@ -1,0 +1,73 @@
+import pandas as pd 
+import requests
+from bs4 import BeautifulSoup
+import sqlite3
+from datetime import datetime
+
+#extract data
+def extract(URL):
+    page = requests.get(URL)
+    soup = BeautifulSoup(page.text,'html.parser')
+    tables = soup.find_all('tbody')
+    rows = tables[0].find_all('tr')
+    data_list=[]
+    for row in rows:
+        col = row.find_all('td')
+        if len(col)!=0:
+            data_list.append({
+                'Name':col[1].get_text(strip=True),
+                'MC_USD_Billion':col[2].get_text(strip=True)
+            })
+    df = pd.DataFrame(data_list)
+    return df
+
+#transform data
+def transform(df):
+    df['MC_USD_Billion'] = pd.to_numeric(df['MC_USD_Billion'])
+    df['MC_GBP_Billion'] = (df['MC_USD_Billion'] * 0.8).round(2)
+    df['MC_EUR_Billion'] = (df['MC_USD_Billion'] * 0.93).round(2)
+    df['MC_INR_Billion'] = (df['MC_USD_Billion'] * 82.95).round(2)
+    return df
+
+#load data
+def load_to_csv(df,csv_path):
+    df.to_csv(csv_path)
+
+def load_to_db(df, conn, table_name):
+    df.to_sql(table_name, conn, if_exists='replace', index=False)
+
+#query data
+def query(query_statement, conn):
+    print(pd.read_sql(query_statement,conn))
+    conn.close()
+
+def log_progress(message):
+    timestamp_format = r'%Y-%m-%d %H:%M:%S'
+    now = datetime.now()
+    timestamp = now.strftime(timestamp_format)
+    with open('./code_log.txt','a') as file:
+        file.write(timestamp + ' ' + message + '\n')
+
+URL = 'https://web.archive.org/web/20230908091635/https://en.wikipedia.org/wiki/List_of_largest_banks'
+output_csv_path = './Largest_banks_data.csv'
+db_name = 'Banks.db'
+table_name = 'Largest_banks'
+
+conn = sqlite3.connect(db_name)
+
+log_progress('start extract')
+ex_df = extract(URL)
+log_progress('end extract')
+
+log_progress('start transform')
+tr_df = transform(ex_df)
+log_progress('end transform')
+
+log_progress('start loading to csv')
+load_to_csv(tr_df, output_csv_path)
+log_progress('end loading to csv')
+
+log_progress('start loading to the database')
+load_to_db(tr_df, conn, table_name)
+log_progress('end loading to database')
+conn.close()
